@@ -14,7 +14,7 @@ import type {
 import { startDriver, selection, type Driver } from "./process.js";
 import { validateSelection } from "./catalog.js";
 import { PromptFiles } from "./prompt.js";
-import { toolItem } from "./timeline.js";
+import { readTranscriptHistory, toolItem } from "./timeline.js";
 import { AntigravityError, diagnostic, type Frame, type Step } from "./wire.js";
 
 const persistenceSchema = z
@@ -40,6 +40,7 @@ interface SessionOptions {
   launch: ProviderLaunch;
   catalog(): ProviderCatalog;
   persistence?: ProviderPersistence;
+  history?: "skip" | "replay";
   emit(event: ProviderEvent): void;
 }
 
@@ -61,6 +62,7 @@ export class Session {
   }
 
   async open(requestId: string, capabilities: readonly string[]): Promise<void> {
+    const hadExistingConversation = this.conversationId !== null;
     await this.ensureDriver();
     this.emit({
       type: "session.opened",
@@ -72,6 +74,21 @@ export class Session {
       cwd: this.config.cwd,
       title: this.config.title,
     });
+    if (
+      hadExistingConversation &&
+      this.conversationId !== null &&
+      this.options.history !== "skip"
+    ) {
+      const historyEntries = await readTranscriptHistory(this.conversationId);
+      for (const entry of historyEntries) {
+        this.emit({
+          type: "timeline.item",
+          sessionId: this.options.id,
+          item: entry.item,
+          ...(entry.timestamp ? { timestamp: entry.timestamp } : {}),
+        });
+      }
+    }
     this.publishFullAccessNotice();
     this.publishConfig();
     this.emit({ type: "session.commands", sessionId: this.options.id, commands: [] });
